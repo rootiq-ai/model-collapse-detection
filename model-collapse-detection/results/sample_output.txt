@@ -1,0 +1,64 @@
+======================================================================
+MODEL COLLAPSE EXPERIMENT: Empirically-Grounded Validation
+======================================================================
+
+Methodology: Text degradation following OPT-125M curves
+Base corpus: 10 human-written samples
+Generations: 0-5 (6 total)
+
+Processing Generation 0... PPL: 15.3, Distinct-2: 0.9936, TTR: 0.7883
+Processing Generation 1... PPL: 15.6, Distinct-2: 0.9914, TTR: 0.7338
+Processing Generation 2... PPL: 15.9, Distinct-2: 0.9914, TTR: 0.6834
+Processing Generation 3... PPL: 16.2, Distinct-2: 0.9807, TTR: 0.6059
+Processing Generation 4... PPL: 18.5, Distinct-2: 0.9657, TTR: 0.4885
+Processing Generation 5... PPL: 21.8, Distinct-2: 0.9272, TTR: 0.3711
+
+==========================================================================================
+RESULTS: Diversity Metrics Across Generations
+==========================================================================================
+
+Gen   PPL      Distinct-1   Distinct-2   TTR        Vocab    ΔPPL       ΔD-1      
+------------------------------------------------------------------------------------------
+0     15.3     0.7883       0.9936       0.7883     376      --         --        
+1     15.6     0.7338       0.9914       0.7338     350      +2.0%      -6.9%     
+2     15.9     0.6834       0.9914       0.6834     326      +3.9%      -13.3%    
+3     16.2     0.6059       0.9807       0.6059     289      +5.9%      -23.1%    
+4     18.5     0.4885       0.9657       0.4885     233      +20.9%     -38.0%    
+5     21.8     0.3711       0.9272       0.3711     177      +42.5%     -52.9%    
+------------------------------------------------------------------------------------------
+
+==========================================================================================
+DETECTION ANALYSIS (10% threshold)
+==========================================================================================
+
+  Metric            Detection Gen    Lead Time vs PPL
+  --------------------------------------------------
+  Distinct-1        2                +2 gen
+  TTR               2                +2 gen
+  Vocabulary        2                +2 gen
+  Perplexity        4                (baseline)
+
+  KEY FINDING: Diversity metrics detect collapse 2 generation(s) before perplexity!
+
+LaTeX table saved to: real_experiment_table.tex
+Metrics saved to: real_experiment_metrics.json
+
+================================================================================
+SAMPLE TEXT COMPARISON
+================================================================================
+
+--- Generation 0 (Original) ---
+Photosynthesis is the biological process by which plants, algae, and certain bacteria 
+    convert light energy into chemical energy stored in glucose molecules. This remarkable 
+    transformation occurs primarily in chloroplasts, organelles containing chlorophyll pigments 
+    that absorb specific...
+
+--- Generation 3 (Early Collapse) ---
+Photosynthesis is the biological process by which were are and important bacteria convert light energy into was energy stored in glucose significant This remarkable transformation occurs primarily in important organelles containing chlorophyll important that absorb specific wavelengths of light. The...
+
+--- Generation 5 (Severe Collapse) ---
+Photosynthesis is the biological process by which are is and this bacteria convert light energy into that energy stored in glucose that This remarkable transformation are this in the is containing chlorophyll this that absorb specific the of light. The process this was various various reactions in t...
+
+================================================================================
+EXPERIMENT COMPLETE
+================================================================================

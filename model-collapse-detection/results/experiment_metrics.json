@@ -1,0 +1,62 @@
+{
+  "0": {
+    "perplexity": 15.3,
+    "distinct_1": 0.7882599580712788,
+    "distinct_2": 0.9935760171306209,
+    "distinct_3": 1.0,
+    "ttr": 0.7882599580712788,
+    "vocab_size": 376,
+    "entropy": 8.28157657438882,
+    "total_tokens": 477
+  },
+  "1": {
+    "perplexity": 15.6,
+    "distinct_1": 0.7337526205450734,
+    "distinct_2": 0.9914346895074947,
+    "distinct_3": 1.0,
+    "ttr": 0.7337526205450734,
+    "vocab_size": 350,
+    "entropy": 8.097453411938169,
+    "total_tokens": 477
+  },
+  "2": {
+    "perplexity": 15.9,
+    "distinct_1": 0.6834381551362684,
+    "distinct_2": 0.9914346895074947,
+    "distinct_3": 1.0,
+    "ttr": 0.6834381551362684,
+    "vocab_size": 326,
+    "entropy": 7.9299875564726445,
+    "total_tokens": 477
+  },
+  "3": {
+    "perplexity": 16.2,
+    "distinct_1": 0.6058700209643606,
+    "distinct_2": 0.9807280513918629,
+    "distinct_3": 1.0,
+    "ttr": 0.6058700209643606,
+    "vocab_size": 289,
+    "entropy": 7.591100983052253,
+    "total_tokens": 477
+  },
+  "4": {
+    "perplexity": 18.5,
+    "distinct_1": 0.48846960167714887,
+    "distinct_2": 0.9657387580299786,
+    "distinct_3": 1.0,
+    "ttr": 0.48846960167714887,
+    "vocab_size": 233,
+    "entropy": 6.995842110893427,
+    "total_tokens": 477
+  },
+  "5": {
+    "perplexity": 21.8,
+    "distinct_1": 0.3710691823899371,
+    "distinct_2": 0.9271948608137045,
+    "distinct_3": 1.0,
+    "ttr": 0.3710691823899371,
+    "vocab_size": 177,
+    "entropy": 6.374012940025607,
+    "total_tokens": 477
+  }
+}

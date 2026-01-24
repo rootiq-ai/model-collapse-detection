@@ -1,0 +1,10 @@
+# Model Collapse Detection Framework
+# Requirements for real_experiment.py
+
+# Core dependencies (Python 3.8+ standard library only)
+# No external packages required for basic experiment
+
+# Optional: For extended analysis and visualization
+# numpy>=1.20.0
+# pandas>=1.3.0
+# matplotlib>=3.4.0
