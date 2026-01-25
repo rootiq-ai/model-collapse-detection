@@ -8,7 +8,7 @@
 > Kamal Singh Bisht, *Senior Member, IEEE*  
 > IEEE WCCI 2026 (IJCNN Track)
 
-## 🎯 The Core Finding: Ordering > Thresholds
+## The Core Finding: Ordering > Thresholds
 
 **Diversity metrics detect collapse before perplexity.**
 
@@ -23,11 +23,11 @@ This *ordering* is the robust finding. Specific thresholds (10%) and lead times 
 
 **Trust the ordering. Calibrate the thresholds.**
 
-## 📖 Narrative Example: Incident Response Timeline
+## Narrative Example: Incident Response Timeline
 
 > A company retrains their customer service LLM **monthly**. In **Month 3**, Distinct-1 drops 12%—Tier 1 alert triggered. Investigation reveals 25% of training data is the model's own prior responses. By **Month 4**, provenance filtering implemented. In **Month 5**, perplexity would have finally crossed threshold—but remediation is already complete.
 
-## 📊 Generation Mapping
+## Generation Mapping
 
 | Your Cadence | 1 Gen = | 2-Gen Lead = |
 |--------------|---------|--------------|
@@ -35,7 +35,7 @@ This *ordering* is the robust finding. Specific thresholds (10%) and lead times 
 | Monthly | 1 month | **2 months warning** |
 | Weekly | 1 week | **2 weeks warning** |
 
-## 📧 Contact
+## Contact
 
 Kamal Singh Bisht  
 Email: reachbisht7@gmail.com
@@ -59,7 +59,7 @@ model-collapse-detection/
     └── .gitkeep
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Option 1: Google Colab (Recommended)
 
@@ -78,7 +78,7 @@ pip install -r requirements.txt
 python experiments/run_experiment.py --model all --scenario both --multi-seed
 ```
 
-## 📊 Results Summary
+## Results Summary
 
 ### GPT-2 Medium (Replace, 3 Seeds, 95% CI)
 
@@ -99,7 +99,7 @@ python experiments/run_experiment.py --model all --scenario both --multi-seed
 | 2 (Confirm) | Perplexity | +10% | Halt pipeline |
 | 3 (Severity) | Entropy, KL | -20% | Remediate |
 
-## 📝 Citation
+## Citation
 
 ```bibtex
 @inproceedings{anonymous2026collapse,
@@ -110,6 +110,6 @@ python experiments/run_experiment.py --model all --scenario both --multi-seed
 }
 ```
 
-## 📄 License
+## License
 
 MIT License
