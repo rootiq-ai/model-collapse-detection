@@ -332,11 +332,12 @@ Figure~\ref{fig:detection} visualizes the detection timeline:
     xlabel={Generation},
     ylabel={Normalized Value},
     xmin=0, xmax=5,
-    ymin=0.4, ymax=1.1,
+    ymin=0.35, ymax=1.1,
     legend pos=south west,
     legend style={font=\scriptsize},
     grid=major,
     grid style={gray!20},
+    clip=false,
 ]
 % Distinct-1 (normalized)
 \addplot[blue, thick, mark=*, mark size=1.5] coordinates {
@@ -348,15 +349,13 @@ Figure~\ref{fig:detection} visualizes the detection timeline:
 };
 % 10% threshold
 \addplot[black, dashed, thick] coordinates {(0, 0.9) (5, 0.9)};
-% Detection points
-\draw[blue, thick, ->] (axis cs:2,0.85) -- (axis cs:2,0.5);
-\draw[red, thick, ->] (axis cs:4,0.71) -- (axis cs:4,0.5);
+% Detection arrows and labels
+\draw[blue, thick, ->] (axis cs:2,0.85) -- (axis cs:2,0.48);
+\node[blue, font=\scriptsize, fill=white, inner sep=1pt] at (axis cs:2,0.42) {D-1: Gen 2};
+\draw[red, thick, ->] (axis cs:4,0.71) -- (axis cs:4,0.48);
+\node[red, font=\scriptsize, fill=white, inner sep=1pt] at (axis cs:4,0.42) {PPL: Gen 4};
 \legend{Distinct-1, 1/PPL (norm), 10\% threshold}
 \end{axis}
-\node[blue, font=\scriptsize] at (1.8, 0.8) {D-1};
-\node[blue, font=\scriptsize] at (1.8, 0.5) {Gen 2};
-\node[red, font=\scriptsize] at (4.2, 0.8) {PPL};
-\node[red, font=\scriptsize] at (4.2, 0.5) {Gen 4};
 \end{tikzpicture}
 \caption{Detection timeline: Distinct-1 crosses 10\% threshold at Generation 2; perplexity at Generation 4. The 2-generation gap represents the early warning window.}
 \label{fig:detection}
@@ -587,31 +586,22 @@ Critical open questions: (1) production-scale validation; (2) domain-specific st
 Experiments conducted on Google Colab Pro (A100).
 
 \bibliographystyle{IEEEtran}
-\begin{thebibliography}{12}
-
-\bibitem{openai2023gpt4}
-OpenAI, ``GPT-4 Technical Report,'' \textit{arXiv:2303.08774}, 2023.
+\begin{thebibliography}{9}
 
 \bibitem{llama3modelcard}
-Meta AI, ``Llama 3 Model Card,'' 2024.
+Meta AI, ``Llama 3 Model Card,'' 2024. [Online]. Available: \url{https://github.com/meta-llama/llama3}
 
 \bibitem{shumailov2024nature}
-I. Shumailov \textit{et al.}, ``AI models collapse when trained on recursively generated data,'' \textit{Nature}, vol. 631, pp. 755--759, 2024.
+I. Shumailov \textit{et al.}, ``AI models collapse when trained on recursively generated data,'' \textit{Nature}, vol. 631, pp. 755--759, Jul. 2024.
 
 \bibitem{schaeffer2025position}
-R. Schaeffer \textit{et al.}, ``Position: Model Collapse Does Not Mean What You Think,'' \textit{arXiv:2503.03150}, 2025.
+R. Schaeffer \textit{et al.}, ``Position: Model Collapse Does Not Mean What You Think,'' in \textit{Proc. ICML}, 2025.
 
 \bibitem{shumailov2023curse}
-I. Shumailov \textit{et al.}, ``The Curse of Recursion,'' \textit{arXiv:2305.17493}, 2023.
+I. Shumailov \textit{et al.}, ``The Curse of Recursion: Training on Generated Data Makes Models Forget,'' \textit{arXiv:2305.17493}, 2023.
 
 \bibitem{gerstgrasser2024inevitable}
-M. Gerstgrasser \textit{et al.}, ``Is Model Collapse Inevitable?'' in \textit{Proc. COLM}, 2024.
-
-\bibitem{vaswani2017attention}
-A. Vaswani \textit{et al.}, ``Attention is All You Need,'' in \textit{Proc. NeurIPS}, 2017.
-
-\bibitem{ho2020denoising}
-J. Ho, A. Jain, and P. Abbeel, ``Denoising Diffusion Probabilistic Models,'' in \textit{Proc. NeurIPS}, 2020.
+M. Gerstgrasser \textit{et al.}, ``Is Model Collapse Inevitable? Breaking the Curse of Recursion by Accumulating Real and Synthetic Data,'' in \textit{Proc. COLM}, 2024.
 
 \bibitem{dohmatob2025strong}
 E. Dohmatob, Y. Feng, and J. Kempe, ``Strong Model Collapse,'' in \textit{Proc. ICLR}, 2025.
@@ -623,7 +613,7 @@ S. Alemohammad \textit{et al.}, ``Self-Consuming Generative Models Go MAD,'' in 
 T. Dettmers \textit{et al.}, ``QLoRA: Efficient Finetuning of Quantized LLMs,'' in \textit{Proc. NeurIPS}, 2023.
 
 \bibitem{radford2019language}
-A. Radford \textit{et al.}, ``Language Models are Unsupervised Multitask Learners,'' OpenAI, 2019.
+A. Radford \textit{et al.}, ``Language Models are Unsupervised Multitask Learners,'' OpenAI Technical Report, 2019.
 
 \end{thebibliography}
 
