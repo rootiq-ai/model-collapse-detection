@@ -40,7 +40,7 @@ This *ordering* is the robust finding. Specific thresholds (10%) and lead times 
 Kamal Singh Bisht  
 Email: reachbisht7@gmail.com
 
-## 📁 Repository Structure
+## Repository Structure
 
 ```
 model-collapse-detection/
