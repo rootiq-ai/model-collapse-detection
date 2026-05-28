@@ -28,6 +28,9 @@ from datasets import Dataset
 from config import CONFIG, TRAIN_CORPUS, TEST_CORPUS, GENERATION_PROMPTS
 from metrics import compute_all_metrics
 
+# Set by --self-bleu CLI flag; defaults to False (O(n^2) is expensive)
+COMPUTE_SELF_BLEU = False
+
 
 def set_seed(seed: int):
     random.seed(seed)
@@ -157,7 +160,7 @@ def run_single_experiment(model_name: str, output_dir: str, seed: int, scenario:
     print(f"   Generating samples...")
     gen_texts = generate_samples(model, tokenizer, CONFIG["samples_per_generation"])
     all_texts[0] = gen_texts
-    all_metrics[0] = compute_all_metrics(gen_texts, model, tokenizer, TEST_CORPUS)
+    all_metrics[0] = compute_all_metrics(gen_texts, model, tokenizer, TEST_CORPUS, reference_texts=TRAIN_CORPUS, include_self_bleu=COMPUTE_SELF_BLEU)
     print(f"   📊 D-1={all_metrics[0]['distinct_1']:.3f}, PPL={all_metrics[0]['perplexity']:.1f}")
     
     # Subsequent generations
@@ -180,7 +183,7 @@ def run_single_experiment(model_name: str, output_dir: str, seed: int, scenario:
         print(f"   Generating samples...")
         gen_texts = generate_samples(model, tokenizer, CONFIG["samples_per_generation"])
         all_texts[gen] = gen_texts
-        all_metrics[gen] = compute_all_metrics(gen_texts, model, tokenizer, TEST_CORPUS)
+        all_metrics[gen] = compute_all_metrics(gen_texts, model, tokenizer, TEST_CORPUS, reference_texts=TRAIN_CORPUS, include_self_bleu=COMPUTE_SELF_BLEU)
         print(f"   📊 D-1={all_metrics[gen]['distinct_1']:.3f}, PPL={all_metrics[gen]['perplexity']:.1f}")
     
     return all_metrics
@@ -257,7 +260,11 @@ def main():
     parser.add_argument("--scenario", choices=["replace", "mixed", "both"], default="both")
     parser.add_argument("--multi-seed", action="store_true", help="Run with multiple seeds (GPT-2 only)")
     parser.add_argument("--output", default="results", help="Output directory")
+    parser.add_argument("--self-bleu", action="store_true", help="Also compute Self-BLEU (Table 6 comparison; O(n^2), slower)")
     args = parser.parse_args()
+    
+    global COMPUTE_SELF_BLEU
+    COMPUTE_SELF_BLEU = bool(args.self_bleu)
     
     os.makedirs(args.output, exist_ok=True)
     

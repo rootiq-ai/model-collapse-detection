@@ -4,41 +4,46 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/)
 
-> **Early Detection of Model Collapse in Large Language Models: A Diversity-Based Framework**  
-> Kamal Singh Bisht, *Senior Member, IEEE*  
-> IEEE WCCI 2026 (IJCNN Track)
+> **Early Detection of Model Collapse in Large Language Models: A Diversity-Based Framework**
+> Kamal Singh Bisht
+> *ICDSA 2026 — Proceedings published in Springer Lecture Notes in Networks and Systems (LNNS), Scopus-indexed*
+> ORCID: [0009-0006-9706-1572](https://orcid.org/0009-0006-9706-1572)
 
 ## The Core Finding: Ordering > Thresholds
 
 **Diversity metrics detect collapse before perplexity.**
 
-This *ordering* is the robust finding. Specific thresholds (10%) and lead times (2 generations) are experimental artifacts that require recalibration. The ordering held across every condition we tested.
+This *ordering* is the robust finding. Specific thresholds (10%) and lead times (≈2 generations) are experimental artifacts of our setting that require recalibration before production use. The ordering held across every condition we tested.
 
-| Condition | Ordering Held? |
-|-----------|----------------|
-| Thresholds 5-20% | ✅ Yes |
-| Scales 355M-8B | ✅ Yes |
-| Contamination 30-100% | ✅ Yes |
-| Self-BLEU comparison | ✅ Yes |
+| Condition                       | Ordering held? |
+|---------------------------------|----------------|
+| Thresholds 5–20%                | ✅ Yes |
+| Scales 355M (GPT-2) and 8B (LLaMA-3) | ✅ Yes |
+| Contamination 30% and 100%      | ✅ Yes |
+| Self-BLEU comparison (Table 6)  | ✅ Yes |
 
 **Trust the ordering. Calibrate the thresholds.**
 
-## Narrative Example: Incident Response Timeline
+## What This Repo Reproduces
 
-> A company retrains their customer service LLM **monthly**. In **Month 3**, Distinct-1 drops 12%—Tier 1 alert triggered. Investigation reveals 25% of training data is the model's own prior responses. By **Month 4**, provenance filtering implemented. In **Month 5**, perplexity would have finally crossed threshold—but remediation is already complete.
+This repository contains the code and seed/test corpora for the ICDSA 2026 paper. It reproduces the experiments reported in the manuscript:
 
-## Generation Mapping
+- Replace and mixed (30% synthetic) recursive fine-tuning on **GPT-2 Medium** (full fine-tuning) and **LLaMA 3-8B** (QLoRA 4-bit).
+- The full Tier 1 / Tier 2 / Tier 3 metric panel (Distinct-1/2/3, TTR, token entropy, perplexity, vocabulary coverage, repetition rate).
+- Multi-seed GPT-2 runs (seeds 42, 123, 456) with bootstrap 95% confidence intervals.
+- Self-BLEU comparison (Table 6) for the Distinct-1 vs Self-BLEU efficiency analysis.
+- Threshold sensitivity sweep (Table 7) over {5%, 10%, 15%, 20%}.
+- Detection-timing analysis that emits both a human-readable summary and LaTeX rows for the paper's tables.
 
-| Your Cadence | 1 Gen = | 2-Gen Lead = |
-|--------------|---------|--------------|
-| Quarterly | 3 months | **6 months warning** |
-| Monthly | 1 month | **2 months warning** |
-| Weekly | 1 week | **2 weeks warning** |
+The repo intentionally does **not** include WikiText-103 / code-generation / tipping-point experiments — those are scoped as future work in the paper.
 
-## Contact
+## Generation Mapping (Table 1 in the paper)
 
-Kamal Singh Bisht  
-Email: reachbisht7@gmail.com
+| Your retraining cadence | 1 generation = | 2-generation lead = |
+|-------------------------|----------------|---------------------|
+| Quarterly refresh       | 3 months       | **6 months of warning** |
+| Monthly retraining      | 1 month        | **2 months of warning** |
+| Weekly fine-tuning      | 1 week         | **2 weeks of warning**  |
 
 ## Repository Structure
 
@@ -49,67 +54,85 @@ model-collapse-detection/
 ├── requirements.txt
 ├── .gitignore
 ├── experiments/
-│   ├── run_experiment.py          # Main experiment (multi-seed, mixed-ratio)
-│   ├── metrics.py                 # Diversity & perplexity metrics
-│   ├── config.py                  # Configuration
-│   └── colab_notebook.ipynb       # Google Colab notebook
+│   ├── __init__.py
+│   ├── config.py                   # Hyperparameters + 10-sample seed corpus + 5-sample test corpus
+│   ├── metrics.py                  # All diversity / perplexity / Self-BLEU metrics
+│   ├── run_experiment.py           # Recursive fine-tuning (replace + mixed; multi-seed)
+│   ├── analyze.py                  # Detection timing, lead time, LaTeX-ready table rows
+│   ├── threshold_sensitivity.py    # Reproduces Table 7 (post-hoc, no retraining)
+│   └── colab_notebook.ipynb        # One-click runner
 ├── paper/
-│   └── wcci2026_model_collapse.tex
+│   └── icdsa2026_model_collapse.tex
 └── results/
     └── .gitkeep
 ```
 
 ## Quick Start
 
-### Option 1: Google Colab (Recommended)
+### Option 1 — Google Colab (recommended)
 
-1. Upload `experiments/colab_notebook.ipynb` to Google Colab
-2. Enable A100 GPU: `Runtime → Change runtime type → A100`
-3. Run all cells (~10-12 hours)
+1. Upload `experiments/colab_notebook.ipynb` to Google Colab.
+2. Enable GPU: `Runtime → Change runtime type → A100` (or T4 for GPT-2-only).
+3. Run all cells. Full run (LLaMA + GPT-2 multi-seed) is ~10–12 h on A100. GPT-2-only is ~3 h.
 
-### Option 2: Local
+### Option 2 — Local
 
 ```bash
-git clone https://github.com/anonymous/model-collapse-detection.git
+git clone https://github.com/rootiq-ai/model-collapse-detection.git
 cd model-collapse-detection
 pip install -r requirements.txt
 
-# Run all experiments (replace + mixed, multi-seed)
-python experiments/run_experiment.py --model all --scenario both --multi-seed
+# Full reproduction: both models, both scenarios, multi-seed GPT-2, Self-BLEU
+python experiments/run_experiment.py --model all --scenario both --multi-seed --self-bleu --output results
+
+# Faster: GPT-2 replace scenario only, single seed
+python experiments/run_experiment.py --model gpt2 --scenario replace --output results
+
+# After the runs finish:
+python experiments/analyze.py --input results/all_results.json
+python experiments/threshold_sensitivity.py --input results/all_results.json
 ```
 
-## Results Summary
+## Detection Framework (Table 2 in the paper)
 
-### GPT-2 Medium (Replace, 3 Seeds, 95% CI)
+| Tier        | Metrics                       | Threshold | Action               |
+|-------------|-------------------------------|-----------|----------------------|
+| 1 (Early)   | Distinct-1, TTR, Entropy      | −10%      | Investigate sources  |
+| 2 (Confirm) | Perplexity                    | +10%      | Halt pipeline        |
+| 3 (Severity)| Vocabulary coverage           | −20%      | Full remediation     |
 
-| Gen | D-1 | PPL | ΔD-1 | ΔPPL |
-|-----|-----|-----|------|------|
-| 0 | 0.756±0.018 | 24.2±0.8 | -- | -- |
-| 1 | 0.698±0.021 | 24.8±0.9 | -8±2% | +2±1% |
-| 2 | 0.641±0.024 | 25.9±1.1 | **-15±3%** | +7±2% |
-| 3 | 0.562±0.028 | 28.4±1.4 | -26±4% | +17±3% |
-| 4 | 0.458±0.031 | 34.2±1.8 | -39±4% | **+41±5%** |
-| 5 | 0.342±0.035 | 43.7±2.3 | -55±5% | +81±7% |
+## Published Results
 
-### Detection Framework
+The paper's results tables (Tables 3, 4, 6, 7, 8, 9) are produced by running the scripts above. After your run completes, `analyze.py` prints exact LaTeX rows you can paste into the manuscript so that the values reported in the paper match the values in this repo.
 
-| Tier | Metrics | Threshold | Action |
-|------|---------|-----------|--------|
-| 1 (Early) | Distinct-1, TTR | -10% | Investigate |
-| 2 (Confirm) | Perplexity | +10% | Halt pipeline |
-| 3 (Severity) | Entropy, KL | -20% | Remediate |
+To reproduce the headline GPT-2 multi-seed replace-scenario result (paper Table 4):
+
+```bash
+python experiments/run_experiment.py --model gpt2 --scenario replace --multi-seed --output results
+python experiments/analyze.py --input results/all_results.json
+```
 
 ## Citation
 
 ```bibtex
-@inproceedings{anonymous2026collapse,
-  title={A Unified Framework for Model Collapse in Generative Neural Networks},
-  author={Anonymous},
-  booktitle={IEEE World Congress on Computational Intelligence (WCCI)},
-  year={2026}
+@inproceedings{bisht2026collapse,
+  title     = {Early Detection of Model Collapse in Large Language Models:
+               A Diversity-Based Framework},
+  author    = {Bisht, Kamal Singh},
+  booktitle = {Proceedings of the 7th International Conference on Data Science
+               and Applications (ICDSA 2026)},
+  series    = {Lecture Notes in Networks and Systems},
+  publisher = {Springer},
+  year      = {2026}
 }
 ```
 
+## Contact
+
+Kamal Singh Bisht
+Email: reachbisht7@gmail.com
+ORCID: [0009-0006-9706-1572](https://orcid.org/0009-0006-9706-1572)
+
 ## License
 
-MIT License
+MIT License (see `LICENSE`).
