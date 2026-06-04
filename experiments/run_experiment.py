@@ -1,47 +1,62 @@
 #!/usr/bin/env python3
 """
 Model Collapse Experiment
-Run recursive fine-tuning on LLaMA 3 and GPT-2
-Includes: multi-seed runs and mixed-ratio experiments
+Run recursive fine-tuning on LLaMA 3 and GPT-2.
+Includes: multi-seed runs, mixed-ratio experiments, and a CPU --dry-run that
+writes a synthetic results JSON (no GPU/models) so analyze.py and
+threshold_sensitivity.py can be exercised end-to-end.
+
+Aligned with colab_notebook.ipynb:
+  * per-model learning rate (GPT-2 uses 2e-5, LLaMA QLoRA uses 2e-4)
+  * plain Trainer + DataCollatorForLanguageModeling (stable across TRL versions)
+
+USAGE
+    python experiments/run_experiment.py --model gpt2 --scenario replace --multi-seed
+    python experiments/run_experiment.py --model all --scenario both --self-bleu
+    python experiments/run_experiment.py --dry-run          # CPU, synthetic JSON
 """
 
 import os
 import json
+import math
 import random
 import argparse
 import numpy as np
-from datetime import datetime
 from typing import List, Dict
-from copy import deepcopy
-
-import torch
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    BitsAndBytesConfig,
-    TrainingArguments,
-)
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from trl import SFTTrainer
-from datasets import Dataset
 
 from config import CONFIG, TRAIN_CORPUS, TEST_CORPUS, GENERATION_PROMPTS
-from metrics import compute_all_metrics
+from metrics import compute_all_metrics, distinct_n, type_token_ratio, \
+    token_entropy, vocabulary_size, repetition_rate, vocabulary_coverage, tokenize
 
 # Set by --self-bleu CLI flag; defaults to False (O(n^2) is expensive)
 COMPUTE_SELF_BLEU = False
 
 
+def _lr_for(model_name: str) -> float:
+    return CONFIG.get("learning_rate_by_model", {}).get(model_name, CONFIG["learning_rate"])
+
+
 def set_seed(seed: int):
     random.seed(seed)
     np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
+    try:
+        import torch
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+    except ImportError:
+        pass
 
 
+# --------------------------------------------------------------------------- #
+# Model loading (torch/transformers imported lazily)
+# --------------------------------------------------------------------------- #
 def load_llama3():
-    print("\n🦙 Loading LLaMA 3-8B with QLoRA...")
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+    from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+
+    print("\nLoading LLaMA 3-8B with QLoRA...")
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
@@ -57,7 +72,7 @@ def load_llama3():
     tokenizer = AutoTokenizer.from_pretrained(CONFIG["models"]["llama3"])
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
-    
+
     model = prepare_model_for_kbit_training(model)
     lora_config = LoraConfig(
         r=CONFIG["lora_r"],
@@ -68,24 +83,29 @@ def load_llama3():
         task_type="CAUSAL_LM",
     )
     model = get_peft_model(model, lora_config)
-    print(f"✅ LLaMA 3 loaded! Memory: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
+    print(f"LLaMA 3 loaded. GPU memory: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
     return model, tokenizer
 
 
 def load_gpt2():
-    print("\n🤖 Loading GPT-2 Medium...")
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    print("\nLoading GPT-2 Medium...")
     model = AutoModelForCausalLM.from_pretrained(
-        CONFIG["models"]["gpt2"],
-        torch_dtype=torch.float16,
+        CONFIG["models"]["gpt2"], torch_dtype=torch.float16,
     ).to("cuda")
     tokenizer = AutoTokenizer.from_pretrained(CONFIG["models"]["gpt2"])
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
-    print(f"✅ GPT-2 loaded! Memory: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
+    print(f"GPT-2 loaded. Parameters: {sum(p.numel() for p in model.parameters()) / 1e6:.0f}M")
     return model, tokenizer
 
 
+# --------------------------------------------------------------------------- #
+# Generation / training
+# --------------------------------------------------------------------------- #
 def generate_samples(model, tokenizer, num_samples: int) -> List[str]:
+    import torch
     model.eval()
     generated_texts = []
     for i in range(num_samples):
@@ -100,214 +120,249 @@ def generate_samples(model, tokenizer, num_samples: int) -> List[str]:
                 do_sample=True,
                 pad_token_id=tokenizer.eos_token_id,
             )
-        generated = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        generated = generated[len(prompt):].strip()
-        if len(generated) > 50:
+        generated = tokenizer.decode(outputs[0], skip_special_tokens=True)[len(prompt):].strip()
+        if len(generated) > CONFIG["min_kept_chars"]:
             generated_texts.append(generated)
         if (i + 1) % 10 == 0:
             print(f"   Generated {i + 1}/{num_samples}")
     return generated_texts
 
 
-def train_model(model, tokenizer, texts: List[str], gen: int, output_dir: str):
-    print(f"   🔄 Training on {len(texts)} samples...")
-    dataset = Dataset.from_dict({"text": texts})
+def train_model(model, tokenizer, texts: List[str], gen: int, output_dir: str, model_name: str):
+    import torch
+    from transformers import Trainer, TrainingArguments, DataCollatorForLanguageModeling
+    from datasets import Dataset
+
+    lr = _lr_for(model_name)
+    print(f"   Training on {len(texts)} samples  [lr={lr:.0e} for {model_name}]")
+    clean = [t for t in texts if t and t.strip()]
+    dataset = Dataset.from_dict({"text": clean})
+    dataset = dataset.map(
+        lambda b: tokenizer(b["text"], truncation=True, max_length=CONFIG["max_seq_length"], padding=False),
+        batched=True, remove_columns=["text"],
+    )
+    collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
     training_args = TrainingArguments(
         output_dir=f"{output_dir}/gen{gen}",
         num_train_epochs=CONFIG["num_train_epochs"],
         per_device_train_batch_size=CONFIG["batch_size"],
         gradient_accumulation_steps=CONFIG["gradient_accumulation_steps"],
-        learning_rate=CONFIG["learning_rate"],
+        learning_rate=lr,
         fp16=True,
         logging_steps=20,
         save_strategy="no",
         report_to="none",
     )
-    trainer = SFTTrainer(
-        model=model,
-        train_dataset=dataset,
-        dataset_text_field="text",
-        tokenizer=tokenizer,
-        args=training_args,
-        max_seq_length=512,
-    )
-    trainer.train()
-    print(f"   ✅ Training complete!")
+    # Cast trainable fp16 params to fp32 for stable optimization.
+    for p in model.parameters():
+        if p.requires_grad and p.dtype == torch.float16:
+            p.data = p.data.float()
+    Trainer(model=model, args=training_args, train_dataset=dataset, data_collator=collator).train()
+    print("   Training complete.")
     return model
 
 
+# --------------------------------------------------------------------------- #
+# Experiment drivers
+# --------------------------------------------------------------------------- #
 def run_single_experiment(model_name: str, output_dir: str, seed: int, scenario: str = "replace"):
-    """Run single experiment with given seed and scenario."""
+    """Run a single experiment with the given seed and scenario."""
+    import gc
+    import torch
     set_seed(seed)
-    
-    print(f"\n{'='*70}")
-    print(f"🚀 {model_name.upper()} | Seed: {seed} | Scenario: {scenario}")
-    print(f"{'='*70}")
-    
-    # Load model
-    if model_name == "llama3":
-        model, tokenizer = load_llama3()
-    else:
-        model, tokenizer = load_gpt2()
-    
+
+    print(f"\n{'=' * 70}")
+    print(f"{model_name.upper()} | Seed: {seed} | Scenario: {scenario}")
+    print(f"{'=' * 70}")
+
+    model, tokenizer = (load_llama3() if model_name == "llama3" else load_gpt2())
     num_gens = CONFIG["mixed_generations"] if scenario == "mixed" else CONFIG["num_generations"]
-    all_metrics = {}
-    all_texts = {}
-    
-    # Generation 0
-    print(f"\n📍 Generation 0: Training on human corpus")
-    model = train_model(model, tokenizer, TRAIN_CORPUS, 0, output_dir)
-    print(f"   Generating samples...")
+    all_metrics, all_texts = {}, {}
+
+    print("\nGeneration 0: training on human corpus")
+    model = train_model(model, tokenizer, TRAIN_CORPUS, 0, output_dir, model_name)
     gen_texts = generate_samples(model, tokenizer, CONFIG["samples_per_generation"])
     all_texts[0] = gen_texts
-    all_metrics[0] = compute_all_metrics(gen_texts, model, tokenizer, TEST_CORPUS, reference_texts=TRAIN_CORPUS, include_self_bleu=COMPUTE_SELF_BLEU)
-    print(f"   📊 D-1={all_metrics[0]['distinct_1']:.3f}, PPL={all_metrics[0]['perplexity']:.1f}")
-    
-    # Subsequent generations
+    all_metrics[0] = compute_all_metrics(gen_texts, model, tokenizer, TEST_CORPUS,
+                                         reference_texts=TRAIN_CORPUS, include_self_bleu=COMPUTE_SELF_BLEU)
+    print(f"   D-1={all_metrics[0]['distinct_1']:.3f}  PPL={all_metrics[0]['perplexity']:.1f}")
+
     for gen in range(1, num_gens):
-        print(f"\n📍 Generation {gen}")
-        
+        print(f"\nGeneration {gen} ({scenario})")
         if scenario == "replace":
-            # 100% synthetic from previous generation
-            train_data = all_texts[gen-1]
-        else:  # mixed
-            # 30% synthetic + 70% real
-            n_synthetic = int(len(all_texts[gen-1]) * CONFIG["mixed_synthetic_ratio"])
-            n_real = CONFIG["samples_per_generation"] - n_synthetic
-            synthetic_samples = random.sample(all_texts[gen-1], min(n_synthetic, len(all_texts[gen-1])))
-            real_samples = random.choices(TRAIN_CORPUS, k=n_real)
-            train_data = synthetic_samples + real_samples
+            train_data = all_texts[gen - 1]
+        else:  # mixed: synthetic from prev gen + original seed corpus
+            n_synthetic = int(len(all_texts[gen - 1]) * CONFIG["mixed_synthetic_ratio"])
+            synthetic = random.sample(all_texts[gen - 1], min(n_synthetic, len(all_texts[gen - 1])))
+            train_data = synthetic + TRAIN_CORPUS
             random.shuffle(train_data)
-        
-        model = train_model(model, tokenizer, train_data, gen, output_dir)
-        print(f"   Generating samples...")
+        model = train_model(model, tokenizer, train_data, gen, output_dir, model_name)
         gen_texts = generate_samples(model, tokenizer, CONFIG["samples_per_generation"])
         all_texts[gen] = gen_texts
-        all_metrics[gen] = compute_all_metrics(gen_texts, model, tokenizer, TEST_CORPUS, reference_texts=TRAIN_CORPUS, include_self_bleu=COMPUTE_SELF_BLEU)
-        print(f"   📊 D-1={all_metrics[gen]['distinct_1']:.3f}, PPL={all_metrics[gen]['perplexity']:.1f}")
-    
+        all_metrics[gen] = compute_all_metrics(gen_texts, model, tokenizer, TEST_CORPUS,
+                                               reference_texts=TRAIN_CORPUS, include_self_bleu=COMPUTE_SELF_BLEU)
+        print(f"   D-1={all_metrics[gen]['distinct_1']:.3f}  PPL={all_metrics[gen]['perplexity']:.1f}")
+
+    del model, tokenizer
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     return all_metrics
 
 
-def bootstrap_ci(values: List[float], n_bootstrap: int = 1000, ci: float = 0.95) -> tuple:
-    """Compute bootstrap confidence interval."""
-    values = np.array(values)
-    bootstrapped = np.array([np.mean(np.random.choice(values, size=len(values), replace=True)) 
-                             for _ in range(n_bootstrap)])
-    lower = np.percentile(bootstrapped, (1 - ci) / 2 * 100)
-    upper = np.percentile(bootstrapped, (1 + ci) / 2 * 100)
-    return np.mean(values), lower, upper
+def bootstrap_ci(values: List[float], n_bootstrap: int = None, ci: float = 0.95) -> tuple:
+    """Bootstrap confidence interval (mean, lower, upper)."""
+    n_bootstrap = n_bootstrap or CONFIG["bootstrap_resamples"]
+    values = np.array(values, dtype=float)
+    boots = np.array([np.mean(np.random.choice(values, size=len(values), replace=True))
+                      for _ in range(n_bootstrap)])
+    lower = np.percentile(boots, (1 - ci) / 2 * 100)
+    upper = np.percentile(boots, (1 + ci) / 2 * 100)
+    return float(np.mean(values)), float(lower), float(upper)
 
 
 def run_multi_seed_experiment(model_name: str, output_dir: str, scenario: str = "replace"):
-    """Run experiment with multiple seeds and compute confidence intervals."""
-    all_runs = []
-    
-    for seed in CONFIG["seeds"]:
-        metrics = run_single_experiment(model_name, f"{output_dir}/seed{seed}", seed, scenario)
-        all_runs.append(metrics)
-    
-    # Aggregate results with confidence intervals
+    """Run the experiment with multiple seeds and aggregate with bootstrap CIs."""
+    all_runs = [run_single_experiment(model_name, f"{output_dir}/seed{seed}", seed, scenario)
+                for seed in CONFIG["seeds"]]
     aggregated = {}
     num_gens = len(all_runs[0])
-    
     for gen in range(num_gens):
         gen_metrics = {}
-        for metric in ['distinct_1', 'distinct_2', 'ttr', 'perplexity']:
+        for metric in ["distinct_1", "distinct_2", "ttr", "entropy", "perplexity", "vocab_size"]:
+            if metric not in all_runs[0][gen]:
+                continue
             values = [run[gen][metric] for run in all_runs]
-            mean, ci_low, ci_high = bootstrap_ci(values)
+            mean, lo, hi = bootstrap_ci(values)
             gen_metrics[metric] = mean
-            gen_metrics[f"{metric}_ci_low"] = ci_low
-            gen_metrics[f"{metric}_ci_high"] = ci_high
+            gen_metrics[f"{metric}_ci_low"] = lo
+            gen_metrics[f"{metric}_ci_high"] = hi
         aggregated[gen] = gen_metrics
-    
     return aggregated, all_runs
 
 
 def print_results(metrics: Dict, model_name: str, with_ci: bool = False):
     baseline = metrics[0]
-    print(f"\n{'='*80}")
-    print(f"📊 RESULTS: {model_name.upper()}")
-    print(f"{'='*80}")
-    
-    if with_ci:
-        print(f"\n{'Gen':<5} {'D-1':<15} {'PPL':<15} {'ΔD-1':<12} {'ΔPPL':<12}")
-        print("-"*60)
-        for gen in sorted(metrics.keys()):
-            m = metrics[gen]
-            d1_str = f"{m['distinct_1']:.3f}±{(m['distinct_1_ci_high']-m['distinct_1_ci_low'])/2:.3f}"
-            ppl_str = f"{m['perplexity']:.1f}±{(m['perplexity_ci_high']-m['perplexity_ci_low'])/2:.1f}"
-            d1_change = ((m['distinct_1'] / baseline['distinct_1']) - 1) * 100 if gen > 0 else 0
-            ppl_change = ((m['perplexity'] / baseline['perplexity']) - 1) * 100 if gen > 0 else 0
-            d1_c = f"{d1_change:+.1f}%" if gen > 0 else "--"
-            ppl_c = f"{ppl_change:+.1f}%" if gen > 0 else "--"
-            print(f"{gen:<5} {d1_str:<15} {ppl_str:<15} {d1_c:<12} {ppl_c:<12}")
-    else:
-        print(f"\n{'Gen':<5} {'D-1':<10} {'PPL':<10} {'ΔD-1':<10} {'ΔPPL':<10}")
-        print("-"*50)
-        for gen in sorted(metrics.keys()):
-            m = metrics[gen]
-            d1_change = ((m['distinct_1'] / baseline['distinct_1']) - 1) * 100 if gen > 0 else 0
-            ppl_change = ((m['perplexity'] / baseline['perplexity']) - 1) * 100 if gen > 0 else 0
-            d1_str = f"{d1_change:+.1f}%" if gen > 0 else "--"
-            ppl_str = f"{ppl_change:+.1f}%" if gen > 0 else "--"
-            print(f"{gen:<5} {m['distinct_1']:<10.4f} {m['perplexity']:<10.1f} {d1_str:<10} {ppl_str:<10}")
+    print(f"\n{'=' * 80}\nRESULTS: {model_name.upper()}\n{'=' * 80}")
+    print(f"\n{'Gen':<5} {'D-1':<12} {'PPL':<12} {'dD-1':<10} {'dPPL':<10}")
+    print("-" * 55)
+    for gen in sorted(metrics.keys()):
+        m = metrics[gen]
+        d1c = "--" if gen == 0 else f"{(m['distinct_1'] / baseline['distinct_1'] - 1) * 100:+.1f}%"
+        pplc = "--" if gen == 0 else f"{(m['perplexity'] / baseline['perplexity'] - 1) * 100:+.1f}%"
+        print(f"{gen:<5} {m['distinct_1']:<12.4f} {m['perplexity']:<12.1f} {d1c:<10} {pplc:<10}")
 
 
+# --------------------------------------------------------------------------- #
+# CPU dry-run: synthetic results JSON (no GPU, no models)
+# --------------------------------------------------------------------------- #
+def _synthetic_panels(scenario: str = "replace") -> Dict[int, Dict]:
+    """Build a deliberately synthetic degrading metric panel for plumbing tests.
+    NOT an experimental result. Diversity drops; a toy perplexity rises slower."""
+    rng = random.Random(42)
+    pool = []
+    for t in TRAIN_CORPUS:
+        pool.extend(tokenize(t))
+    from collections import Counter
+    pool = [w for w, _ in Counter(pool).most_common()]
+    num_gens = CONFIG["mixed_generations"] if scenario == "mixed" else CONFIG["num_generations"]
+    panels = {}
+    for g in range(num_gens):
+        keep = max(8, int(len(pool) * (0.9 ** g)))
+        rep_bias = min(0.85, 0.22 + 0.05 * g)
+        active = pool[:keep]
+        texts = []
+        for _ in range(CONFIG["samples_per_generation"]):
+            words, last = [], rng.choice(active)
+            for _ in range(rng.randint(40, 70)):
+                if rng.random() < rep_bias:
+                    words.append(last)
+                else:
+                    last = rng.choice(active)
+                    words.append(last)
+            texts.append(" ".join(words) + ".")
+        panels[g] = {
+            "distinct_1": distinct_n(texts, 1),
+            "distinct_2": distinct_n(texts, 2),
+            "distinct_3": distinct_n(texts, 3),
+            "ttr": type_token_ratio(texts),
+            "vocab_size": vocabulary_size(texts),
+            "entropy": token_entropy(texts),
+            "repetition_rate": repetition_rate(texts),
+            "vocab_coverage": vocabulary_coverage(texts, TRAIN_CORPUS),
+            "perplexity": 24.2 * (1.0 + 0.012 * g + 0.010 * g * g),  # toy curve
+            "num_samples": len(texts),
+            "synthetic": True,
+        }
+    return panels
+
+
+def run_dry(output_dir: str):
+    banner = "PIPELINE SELF-TEST -- NOT EXPERIMENTAL RESULTS (synthetic toy data)"
+    print("\n" + "#" * 72 + f"\n# {banner}\n" + "#" * 72)
+    results = {
+        "gpt2_replace": _synthetic_panels("replace"),
+        "gpt2_mixed": _synthetic_panels("mixed"),
+        "llama3_replace": _synthetic_panels("replace"),
+    }
+    print_results(results["gpt2_replace"], "GPT-2 (synthetic self-test)")
+    path = os.path.join(output_dir, "selftest_results.json")
+    with open(path, "w") as f:
+        json.dump({k: {str(g): v for g, v in m.items()} for k, m in results.items()}, f, indent=2)
+    print(f"\nWrote {path}")
+    print("Now exercise the analysis on it:")
+    print(f"   python experiments/analyze.py --input {path}")
+    print(f"   python experiments/threshold_sensitivity.py --input {path}")
+
+
+# --------------------------------------------------------------------------- #
 def main():
     parser = argparse.ArgumentParser(description="Model Collapse Experiment")
     parser.add_argument("--model", choices=["llama3", "gpt2", "all"], default="all")
     parser.add_argument("--scenario", choices=["replace", "mixed", "both"], default="both")
-    parser.add_argument("--multi-seed", action="store_true", help="Run with multiple seeds (GPT-2 only)")
+    parser.add_argument("--multi-seed", action="store_true", help="Run with multiple seeds (GPT-2)")
     parser.add_argument("--output", default="results", help="Output directory")
-    parser.add_argument("--self-bleu", action="store_true", help="Also compute Self-BLEU (Table 6 comparison; O(n^2), slower)")
+    parser.add_argument("--self-bleu", action="store_true", help="Also compute Self-BLEU (Table 6; O(n^2))")
+    parser.add_argument("--dry-run", action="store_true", help="CPU synthetic results JSON (no GPU/models)")
     args = parser.parse_args()
-    
+
+    os.makedirs(args.output, exist_ok=True)
+
+    if args.dry_run:
+        run_dry(args.output)
+        return
+
     global COMPUTE_SELF_BLEU
     COMPUTE_SELF_BLEU = bool(args.self_bleu)
-    
-    os.makedirs(args.output, exist_ok=True)
-    
+
     results = {}
-    
-    # LLaMA 3 experiments (single seed due to compute)
-    if args.model in ["llama3", "all"]:
-        if args.scenario in ["replace", "both"]:
-            set_seed(CONFIG["seeds"][0])
-            llama_replace = run_single_experiment("llama3", f"{args.output}/llama3_replace", CONFIG["seeds"][0], "replace")
-            print_results(llama_replace, "LLaMA 3-8B (Replace)")
-            results["llama3_replace"] = llama_replace
-    
-    # GPT-2 experiments (multi-seed)
+
+    if args.model in ["llama3", "all"] and args.scenario in ["replace", "both"]:
+        llama_replace = run_single_experiment("llama3", f"{args.output}/llama3_replace",
+                                              CONFIG["seeds"][0], "replace")
+        print_results(llama_replace, "LLaMA 3-8B (Replace)")
+        results["llama3_replace"] = llama_replace
+
     if args.model in ["gpt2", "all"]:
-        import gc
-        gc.collect()
-        torch.cuda.empty_cache()
-        
         if args.scenario in ["replace", "both"]:
             if args.multi_seed:
                 gpt2_replace, _ = run_multi_seed_experiment("gpt2", f"{args.output}/gpt2_replace", "replace")
                 print_results(gpt2_replace, "GPT-2 (Replace, 3 seeds)", with_ci=True)
             else:
-                set_seed(CONFIG["seeds"][0])
-                gpt2_replace = run_single_experiment("gpt2", f"{args.output}/gpt2_replace", CONFIG["seeds"][0], "replace")
+                gpt2_replace = run_single_experiment("gpt2", f"{args.output}/gpt2_replace",
+                                                    CONFIG["seeds"][0], "replace")
                 print_results(gpt2_replace, "GPT-2 (Replace)")
             results["gpt2_replace"] = gpt2_replace
-        
+
         if args.scenario in ["mixed", "both"]:
-            gc.collect()
-            torch.cuda.empty_cache()
-            set_seed(CONFIG["seeds"][0])
-            gpt2_mixed = run_single_experiment("gpt2", f"{args.output}/gpt2_mixed", CONFIG["seeds"][0], "mixed")
+            gpt2_mixed = run_single_experiment("gpt2", f"{args.output}/gpt2_mixed",
+                                              CONFIG["seeds"][0], "mixed")
             print_results(gpt2_mixed, "GPT-2 (Mixed 30%)")
             results["gpt2_mixed"] = gpt2_mixed
-    
-    # Save all results
+
     with open(f"{args.output}/all_results.json", "w") as f:
         json.dump({k: {str(g): v for g, v in m.items()} for k, m in results.items()}, f, indent=2)
-    
-    print("\n🎉 ALL EXPERIMENTS COMPLETE!")
-    print(f"Results saved to {args.output}/")
+    print(f"\nAll experiments complete. Results saved to {args.output}/")
 
 
 if __name__ == "__main__":

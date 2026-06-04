@@ -10,6 +10,19 @@ Tier 1 (early warning):  distinct_n, type_token_ratio, token_entropy
 Tier 2 (confirmation):   compute_perplexity
 Tier 3 (severity):       vocabulary_coverage, repetition_rate, vocabulary_size
 Comparison baseline:     self_bleu  (O(n^2), used only for Table 6 comparison)
+
+DEFINITION NOTE (matches colab_notebook.ipynb)
+----------------------------------------------
+Distinct-n and TTR are computed PER SAMPLE and AVERAGED. This is the standard
+Distinct-n definition and is what reproduces the paper's scale (Gen-0
+Distinct-1 ~ 0.7-0.8). The earlier POOLED variant (concatenate all samples,
+then count unique/total) puts Gen-0 Distinct-1 near ~0.19 and does NOT match
+Tables 3-4; it is retained here only as ``distinct_n_pooled`` /
+``type_token_ratio_pooled`` for comparison. If a metric panel ever shows Gen-0
+Distinct-1 ~0.19, the pooled definition crept back in.
+
+For unigrams, TTR is identical to Distinct-1 by construction (unique tokens /
+total tokens). The two columns will match; report only one in the paper.
 """
 
 import math
@@ -39,26 +52,45 @@ def get_ngrams(tokens: List[str], n: int) -> List[Tuple]:
 
 
 # --------------------------------------------------------------------------- #
-# Tier 1: diversity metrics (early warning)
+# Tier 1: diversity metrics (early warning) — PER-SAMPLE AVERAGED
 # --------------------------------------------------------------------------- #
 def distinct_n(texts: List[str], n: int) -> float:
-    """Distinct-n = |unique n-grams| / |total n-grams| across the sample set."""
-    all_ngrams = []
+    """Distinct-n = mean over samples of (|unique n-grams| / |n-grams|)."""
+    vals = []
     for text in texts:
-        all_ngrams.extend(get_ngrams(tokenize(text), n))
-    if not all_ngrams:
-        return 0.0
-    return len(set(all_ngrams)) / len(all_ngrams)
+        grams = get_ngrams(tokenize(text), n)
+        if grams:
+            vals.append(len(set(grams)) / len(grams))
+    return sum(vals) / len(vals) if vals else 0.0
 
 
 def type_token_ratio(texts: List[str]) -> float:
-    """TTR = |unique tokens| / |total tokens|."""
+    """TTR = mean over samples of (|unique tokens| / |tokens|)."""
+    vals = []
+    for text in texts:
+        toks = tokenize(text)
+        if toks:
+            vals.append(len(set(toks)) / len(toks))
+    return sum(vals) / len(vals) if vals else 0.0
+
+
+# --------------------------------------------------------------------------- #
+# Pooled variants — kept for reference/debugging only (NOT paper-scale)
+# --------------------------------------------------------------------------- #
+def distinct_n_pooled(texts: List[str], n: int) -> float:
+    """Pooled Distinct-n across the whole sample set. Gen-0 ~0.19; do not use
+    for the paper tables. Retained to document the original definition."""
+    all_ngrams = []
+    for text in texts:
+        all_ngrams.extend(get_ngrams(tokenize(text), n))
+    return len(set(all_ngrams)) / len(all_ngrams) if all_ngrams else 0.0
+
+
+def type_token_ratio_pooled(texts: List[str]) -> float:
     all_tokens = []
     for text in texts:
         all_tokens.extend(tokenize(text))
-    if not all_tokens:
-        return 0.0
-    return len(set(all_tokens)) / len(all_tokens)
+    return len(set(all_tokens)) / len(all_tokens) if all_tokens else 0.0
 
 
 def vocabulary_size(texts: List[str]) -> int:
@@ -101,11 +133,24 @@ def vocabulary_coverage(texts: List[str], reference_texts: List[str]) -> float:
 
 
 def repetition_rate(texts: List[str]) -> float:
+    """Per-sample average of (1 - unique/total tokens) — the lexical-repetition
+    proxy used in colab_notebook.ipynb for Table 9.
+
+    NOTE: an alternative definition (fraction of tokens that immediately repeat
+    the previous token) is available as ``repetition_rate_consecutive``. The two
+    give different magnitudes; choose ONE for Table 9 and state it in the paper.
     """
-    Fraction of tokens that are immediate repeats of the previous token.
-    This is the coarse proxy the paper uses for the 'the the process' degeneration
-    pattern reported in Table 9.
-    """
+    vals = []
+    for text in texts:
+        toks = tokenize(text)
+        if toks:
+            vals.append(1.0 - len(set(toks)) / len(toks))
+    return sum(vals) / len(vals) if vals else 0.0
+
+
+def repetition_rate_consecutive(texts: List[str]) -> float:
+    """Fraction of tokens that are immediate repeats of the previous token
+    (the 'the the process' degeneration pattern). Alternative to repetition_rate."""
     repeats = 0
     total = 0
     for text in texts:
@@ -121,10 +166,8 @@ def repetition_rate(texts: List[str]) -> float:
 # Tier 2: perplexity (confirmation)
 # --------------------------------------------------------------------------- #
 def compute_perplexity(model, tokenizer, texts: List[str], max_length: int = 512) -> float:
-    """
-    Corpus-level perplexity = exp(total_nll / total_tokens) on a fixed,
-    held-out test set. The test set must never be used in training.
-    """
+    """Corpus-level perplexity = exp(total_nll / total_tokens) on a fixed,
+    held-out test set. The test set must never be used in training."""
     if torch is None:
         raise ImportError("compute_perplexity requires torch")
     model.eval()
@@ -147,12 +190,8 @@ def compute_perplexity(model, tokenizer, texts: List[str], max_length: int = 512
 # Comparison baseline: Self-BLEU (Table 6 in the paper)
 # --------------------------------------------------------------------------- #
 def self_bleu(texts: List[str], max_n: int = 4) -> float:
-    """
-    Self-BLEU: each sample scored as hypothesis against all other samples as
-    references; return the mean. Higher Self-BLEU == lower diversity.
-    O(n^2) in samples; the paper uses this for the Distinct-1 vs Self-BLEU
-    comparison only, not for routine monitoring.
-    """
+    """Self-BLEU: each sample scored as hypothesis against all others as
+    references; return the mean. Higher == lower diversity. O(n^2)."""
     try:
         from nltk.translate.bleu_score import SmoothingFunction, sentence_bleu
     except ImportError as exc:  # pragma: no cover
@@ -176,12 +215,12 @@ def compute_all_metrics(
     texts: List[str],
     model=None,
     tokenizer=None,
-    test_texts: List[str] | None = None,
-    reference_texts: List[str] | None = None,
+    test_texts: "List[str] | None" = None,
+    reference_texts: "List[str] | None" = None,
     include_self_bleu: bool = False,
 ) -> Dict:
-    """
-    Returns every metric for one generation's worth of samples.
+    """Returns every metric for one generation's worth of samples.
+
     Perplexity is computed only if model/tokenizer/test_texts are provided.
     Self-BLEU is computed only if include_self_bleu=True (O(n^2)).
     Vocabulary coverage is computed only if reference_texts is provided.

@@ -1,30 +1,55 @@
-"""Configuration for Model Collapse Experiments"""
+"""Configuration for Model Collapse Experiments.
+
+Aligned with colab_notebook.ipynb. Two settings differ from the original repo
+config and matter for reproducing the paper's ordering claim:
+
+  * num_generations = 8 (was 6): a gentler GPT-2 fine-tune collapses more
+    slowly, so a longer horizon keeps detection inside the window.
+  * learning_rate_by_model: GPT-2 is fully fine-tuned and collapses in ONE
+    generation at 2e-4, leaving no resolution to measure a lead time. 2e-5
+    makes it degrade gradually (similar pace to LLaMA's QLoRA updates). This is
+    not a thumb on the scale toward +2 — it just lets the experiment report
+    whatever ordering is actually present.
+"""
 
 CONFIG = {
     "models": {
         "llama3": "meta-llama/Meta-Llama-3-8B",
         "gpt2": "gpt2-medium",
     },
-    "num_generations": 6,
+    "num_generations": 8,
     "samples_per_generation": 50,
     "max_new_tokens": 150,
     "num_train_epochs": 1,
     "batch_size": 4,
     "gradient_accumulation_steps": 4,
+
+    # Default / fallback LR, plus per-model overrides (see module docstring).
     "learning_rate": 2e-4,
+    "learning_rate_by_model": {
+        "llama3": 2e-4,   # QLoRA: gentle low-rank updates
+        "gpt2": 2e-5,     # full fine-tune: ~10x lower
+    },
+
     "lora_r": 16,
     "lora_alpha": 32,
     "lora_dropout": 0.05,
     "temperature": 0.8,
     "top_p": 0.9,
-    "detection_threshold": 0.10,
-    
-    # Multi-seed for statistical rigor (GPT-2 only)
+    "max_seq_length": 512,
+    "min_kept_chars": 50,
+
+    # Detection
+    "detection_threshold": 0.10,            # primary Tier-1/Tier-2 threshold
+    "thresholds": [0.05, 0.10, 0.15, 0.20],  # Table 7 sweep
+    "bootstrap_resamples": 1000,
+
+    # Multi-seed for statistical rigor (GPT-2)
     "seeds": [42, 123, 456],
-    
+
     # Mixed scenario settings
-    "mixed_synthetic_ratio": 0.30,  # 30% synthetic, 70% real
-    "mixed_generations": 9,  # More generations for mixed (slower collapse)
+    "mixed_synthetic_ratio": 0.30,          # 30% synthetic, 70% real
+    "mixed_generations": 9,                 # more generations for slower collapse
 }
 
 TRAIN_CORPUS = [
