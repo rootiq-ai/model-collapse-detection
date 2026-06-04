@@ -8,9 +8,13 @@ Reads the experiment results JSON and computes the quantities reported in:
 
 Also prints LaTeX-ready row strings you can paste straight into the paper.
 
+NOTE: with the per-sample Distinct-n definition in metrics.py, Gen-0 Distinct-1
+should land ~0.7-0.8. If it reads ~0.19 here, the results were produced with the
+pooled definition and should be regenerated.
+
 USAGE
     python experiments/analyze.py --input results/all_results.json
-    python experiments/analyze.py --input results/gpt2_replace_seed42.json --tier1 0.10
+    python experiments/analyze.py --input results/selftest_results.json --tier1 0.10
 """
 
 from __future__ import annotations
@@ -19,43 +23,34 @@ import argparse
 import glob
 import json
 import os
-from collections import defaultdict
 from statistics import mean
-from typing import Dict, List
+from typing import Dict
 
 
 # --------------------------------------------------------------------------- #
 def load_one_file(path: str) -> Dict[str, Dict[int, Dict]]:
-    """
-    Returns a dict { experiment_name: { generation: metric_panel } }.
-    Supports both the multi-seed all_results.json format and per-run JSON.
-    """
+    """Returns { experiment_name: { generation: metric_panel } }.
+    Supports both the multi-experiment all_results.json format and a per-run JSON."""
     with open(path) as f:
         data = json.load(f)
 
     out: Dict[str, Dict[int, Dict]] = {}
-    # Heuristic: if top-level keys look like experiment names, descend one level
     if all(isinstance(v, dict) for v in data.values()) and \
-       any(isinstance(vv, dict) and any(k.isdigit() or isinstance(k, int) for k in vv) for vv in data.values()):
+       any(isinstance(vv, dict) and any(str(k).isdigit() for k in vv) for vv in data.values()):
         for exp_name, gens in data.items():
             out[exp_name] = {int(g): m for g, m in gens.items()}
     else:
-        # Flat: dict keyed by generation
         out[os.path.basename(path)] = {int(g): m for g, m in data.items()}
     return out
 
 
 def mean_by_generation(panels: Dict[int, Dict], key: str) -> Dict[int, float]:
-    """For multi-seed combined panels where each value is already a mean (or a list)."""
     out = {}
     for g, m in panels.items():
         v = m.get(key)
         if v is None:
             continue
-        if isinstance(v, list):
-            out[g] = mean(v)
-        else:
-            out[g] = float(v)
+        out[g] = mean(v) if isinstance(v, list) else float(v)
     return out
 
 
@@ -90,8 +85,8 @@ def report_one(name: str, panels: Dict[int, Dict], tier1: float, tier2: float):
     base_d1 = d1.get(0)
     base_ppl = ppl.get(0)
     for g in sorted(d1):
-        dd = "" if base_d1 is None else f"{(d1[g]-base_d1)/base_d1*100:+.1f}%"
-        dp = "" if base_ppl is None or g not in ppl else f"{(ppl[g]-base_ppl)/base_ppl*100:+.1f}%"
+        dd = "" if base_d1 is None else f"{(d1[g] - base_d1) / base_d1 * 100:+.1f}%"
+        dp = "" if (base_ppl is None or g not in ppl) else f"{(ppl[g] - base_ppl) / base_ppl * 100:+.1f}%"
         print(f"{g:>3} {d1.get(g, float('nan')):>7.3f} {ttr.get(g, float('nan')):>7.3f} "
               f"{ent.get(g, float('nan')):>8.2f} {ppl.get(g, float('nan')):>7.2f} "
               f"{vocab.get(g, float('nan')):>7.0f} {dd:>8} {dp:>8}")
@@ -100,19 +95,18 @@ def report_one(name: str, panels: Dict[int, Dict], tier1: float, tier2: float):
     ttr_det = first_crossing(ttr, "drop", tier1)
     ent_det = first_crossing(ent, "drop", tier1)
     ppl_det = first_crossing(ppl, "rise", tier2)
-    print(f"\nDetection timing  (Tier 1 = -{int(tier1*100)}%, Tier 2 = +{int(tier2*100)}%):")
-    print(f"  Distinct-1 detects at: {'Gen '+str(d1_det) if d1_det is not None else 'within horizon: no'}")
-    print(f"  TTR        detects at: {'Gen '+str(ttr_det) if ttr_det is not None else 'within horizon: no'}")
-    print(f"  Entropy    detects at: {'Gen '+str(ent_det) if ent_det is not None else 'within horizon: no'}")
-    print(f"  Perplexity detects at: {'Gen '+str(ppl_det) if ppl_det is not None else 'within horizon: no'}")
+    print(f"\nDetection timing  (Tier 1 = -{int(tier1 * 100)}%, Tier 2 = +{int(tier2 * 100)}%):")
+    print(f"  Distinct-1 detects at: {'Gen ' + str(d1_det) if d1_det is not None else 'within horizon: no'}")
+    print(f"  TTR        detects at: {'Gen ' + str(ttr_det) if ttr_det is not None else 'within horizon: no'}")
+    print(f"  Entropy    detects at: {'Gen ' + str(ent_det) if ent_det is not None else 'within horizon: no'}")
+    print(f"  Perplexity detects at: {'Gen ' + str(ppl_det) if ppl_det is not None else 'within horizon: no'}")
     if d1_det is not None and ppl_det is not None:
         lead = ppl_det - d1_det
         print(f"  Lead time (diversity before perplexity): {lead} generation(s)")
         if lead >= 1:
             print("  => Ordering replicated: diversity precedes perplexity.")
 
-    # LaTeX rows (paste directly into the Springer paper tables)
-    print("\nLaTeX rows for Table 4/X (Gen, D-1, TTR, Entropy, PPL, Vocab):")
+    print("\nLaTeX rows (Gen, D-1, TTR, Entropy, PPL, Vocab):")
     for g in sorted(d1):
         print(f"  {g} & {d1.get(g, float('nan')):.3f} & {ttr.get(g, float('nan')):.3f} & "
               f"{ent.get(g, float('nan')):.2f} & {ppl.get(g, float('nan')):.2f} & "
@@ -132,8 +126,7 @@ def main():
         if not os.path.exists(f):
             print(f"skip (not found): {f}")
             continue
-        all_runs = load_one_file(f)
-        for name, panels in all_runs.items():
+        for name, panels in load_one_file(f).items():
             report_one(name, panels, args.tier1, args.tier2)
 
 
