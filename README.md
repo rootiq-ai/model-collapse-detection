@@ -40,7 +40,30 @@ pip install -r requirements.txt
 LLaMA 3-8B is gated — accept its license on Hugging Face and authenticate
 (`huggingface-cli login`, or set `HF_TOKEN`) before a real run.
 
-## Run
+## Run in Google Colab (easiest — no local GPU)
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/rootiq-ai/model-collapse-detection/blob/main/experiments/colab_notebook.ipynb)
+
+`experiments/colab_notebook.ipynb` runs the whole pipeline end-to-end and
+regenerates every paper table and Figure 1 from the live run — nothing is
+hardcoded. To use it:
+
+1. Click the badge above (or open <https://colab.research.google.com> →
+   **GitHub** → paste this repo URL → pick `experiments/colab_notebook.ipynb`).
+2. **Runtime → Change runtime type → GPU.** An **A100** matches the paper;
+   a T4/V100 also works (slower). The first cell installs dependencies and
+   prints the detected GPU.
+3. Run the Hugging Face login cell and accept the gated
+   [LLaMA 3-8B](https://huggingface.co/meta-llama/Meta-Llama-3-8B) license, or
+   skip the LLaMA cells to run GPT-2 only.
+4. **Runtime → Run all.** Tables 1–9, the comparison table, and Figure 1 are
+   emitted at the bottom; `figure1_detection_timeline.png` and the per-table
+   `.tex` files can be downloaded from the Colab file browser.
+
+The badge points at the `main` branch of `rootiq-ai/model-collapse-detection`;
+update the owner/branch in the URL if you fork the repo.
+
+## Run locally
 
 Experiments and analysis are separate steps: `run_experiment.py` does the
 training and writes JSON to `results/`; `analyze.py` and
