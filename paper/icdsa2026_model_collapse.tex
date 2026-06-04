@@ -6,6 +6,8 @@
 % Build:  pdflatex main  ->  bibtex main  ->  pdflatex main  ->  pdflatex main
 % Requires the Springer class file svproc.cls (included in the template ZIP)
 % and figure1.pdf (or figure1.png) in the same folder.
+%
+% References corrected and renumbered in order of first citation.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \documentclass{svproc}
@@ -118,7 +120,7 @@ $p(w)=\epsilon \ll 1$ in the original distribution, its expected count in $n$
 generated samples is $n\epsilon$. For rare tokens, sampling variance causes
 systematic underrepresentation. Over multiple generations, this creates
 \emph{tail erosion}: the progressive loss of low-probability vocabulary and
-patterns~\cite{shumailov2024nature,dohmatob2025strong}. These errors accumulate
+patterns~\cite{shumailov2024nature,dohmatob2024tale}. These errors accumulate
 because each generation is trained to match the empirical distribution of the
 previous generation's samples, not its underlying model distribution.
 
@@ -268,7 +270,9 @@ from 1{,}000 resamples. Experiments were conducted on an NVIDIA A100 40~GB via
 Google Colab Pro.
 
 \subsection{Results: Replace Scenario}
-Table~\ref{tab:llama} shows the LLaMA~3-8B collapse progression.
+Table~\ref{tab:llama} shows the LLaMA~3-8B collapse progression, and
+Table~\ref{tab:gpt2} shows the GPT-2 results with confidence intervals across
+three seeds.
 
 \begin{table}[t]
 \centering
@@ -287,9 +291,6 @@ Gen & \dist{1} & TTR & Entropy & PPL & $\Delta$\dist{1} \\
 \noalign{\smallskip}\hline
 \end{tabular}
 \end{table}
-
-Table~\ref{tab:gpt2} shows the GPT-2 results with confidence intervals across three
-seeds.
 
 \begin{table}[t]
 \centering
@@ -450,7 +451,7 @@ collapse.
 
 \subsection{Why Diversity Metrics Detect First}
 The consistent two-generation lead has a theoretical explanation grounded in the
-``Tale of Tails'' framework~\cite{dohmatob2025strong}. Perplexity measures average
+``Tale of Tails'' framework~\cite{dohmatob2024tale}. Perplexity measures average
 prediction quality across all tokens; this expectation is dominated by
 high-frequency tokens and common patterns, which remain stable during early
 collapse. A model can therefore maintain low perplexity while losing significant
@@ -524,9 +525,9 @@ diffusion models, documenting Model Autophagy Disorder.
 
 \noindent\textbf{Theoretical foundations.} Dohmatob et
 al.~\cite{dohmatob2025strong} proved that the collapse rate scales with the fraction
-of synthetic data; their ``Tale of Tails'' insight---that rare patterns erode first
-due to sampling variance---directly motivates our use of diversity metrics as
-early-warning signals.
+of synthetic data; their related ``Tale of Tails''
+analysis~\cite{dohmatob2024tale}---that rare patterns erode first due to sampling
+variance---directly motivates our use of diversity metrics as early-warning signals.
 
 \noindent\textbf{Collapse prevention.} Gerstgrasser et
 al.~\cite{gerstgrasser2024inevitable} proved that the accumulate strategy prevents
@@ -570,31 +571,38 @@ feedback.
 
 % =================================================================
 % ---- Bibliography ----
+% References are listed in order of first citation in the text.
 % NOTE: An inline thebibliography block is used so the file compiles
 % without the external Springer .bst. If you prefer BibTeX, the
 % accompanying references.bib is provided; switch to:
 %     \bibliographystyle{splncs04}
 %     \bibliography{references}
 % (splncs04.bst ships with the Springer LNCS LaTeX package / Overleaf).
-\begin{thebibliography}{9}
-
-\bibitem{meta2024llama3}
-Meta AI: Llama 3 Model Card (2024), \url{https://github.com/meta-llama/llama3}
+\begin{thebibliography}{10}
 
 \bibitem{shumailov2024nature}
-Shumailov, I., Shumaylov, Z., Zhao, Y., Gal, Y., Papernot, N., Anderson, R.:
+Shumailov, I., Shumaylov, Z., Zhao, Y., Papernot, N., Anderson, R., Gal, Y.:
 AI models collapse when trained on recursively generated data. Nature \textbf{631},
 755--759 (2024)
-
-\bibitem{schaeffer2025position}
-Schaeffer, R., Miranda, B., Koyejo, S.: Position: model collapse does not mean
-what you think. In: Proceedings of the International Conference on Machine Learning
-(ICML) (2025)
 
 \bibitem{shumailov2023curse}
 Shumailov, I., Shumaylov, Z., Zhao, Y., Gal, Y., Papernot, N., Anderson, R.:
 The curse of recursion: training on generated data makes models forget.
 arXiv:2305.17493 (2023)
+
+\bibitem{schaeffer2025position}
+Schaeffer, R., Kazdan, J., Arulandu, A.C., Koyejo, S.: Position: model collapse
+does not mean what you think. arXiv:2503.03150 (2025)
+
+\bibitem{dohmatob2024tale}
+Dohmatob, E., Feng, Y., Yang, P., Charton, F., Kempe, J.: A tale of tails: model
+collapse as a change of scaling laws. In: Proceedings of the 41st International
+Conference on Machine Learning (ICML). Proceedings of Machine Learning Research,
+vol. 235, pp. 11165--11197 (2024)
+
+\bibitem{dohmatob2025strong}
+Dohmatob, E., Feng, Y., Subramonian, A., Kempe, J.: Strong model collapse. In:
+International Conference on Learning Representations (ICLR) (2025)
 
 \bibitem{gerstgrasser2024inevitable}
 Gerstgrasser, M., Schaeffer, R., Dey, A., Rafailov, R., Sleight, H., Hughes, J.,
@@ -603,14 +611,8 @@ Koyejo, S.: Is model collapse inevitable? Breaking the curse of recursion by
 accumulating real and synthetic data. In: Conference on Language Modeling (COLM)
 (2024)
 
-\bibitem{dohmatob2025strong}
-Dohmatob, E., Feng, Y., Kempe, J.: Strong model collapse. In: International
-Conference on Learning Representations (ICLR) (2025)
-
-\bibitem{alemohammad2024mad}
-Alemohammad, S., Casco-Rodriguez, J., Luzi, L., Humayun, A.I., Babaei, H.,
-LeJeune, D., Siahkoohi, A., Baraniuk, R.G.: Self-consuming generative models go MAD.
-In: International Conference on Learning Representations (ICLR) (2024)
+\bibitem{meta2024llama3}
+Meta AI: Llama 3 Model Card (2024), \url{https://github.com/meta-llama/llama3}
 
 \bibitem{dettmers2023qlora}
 Dettmers, T., Pagnoni, A., Holtzman, A., Zettlemoyer, L.: QLoRA: efficient
@@ -620,6 +622,11 @@ finetuning of quantized LLMs. In: Advances in Neural Information Processing Syst
 \bibitem{radford2019language}
 Radford, A., Wu, J., Child, R., Luan, D., Amodei, D., Sutskever, I.: Language models
 are unsupervised multitask learners. OpenAI Technical Report (2019)
+
+\bibitem{alemohammad2024mad}
+Alemohammad, S., Casco-Rodriguez, J., Luzi, L., Humayun, A.I., Babaei, H.,
+LeJeune, D., Siahkoohi, A., Baraniuk, R.G.: Self-consuming generative models go MAD.
+In: International Conference on Learning Representations (ICLR) (2024)
 
 \end{thebibliography}
 
